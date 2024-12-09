@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 
 
 @Entity
-@Table(name = "prices")
+@Table(name = "prices", uniqueConstraints = {@UniqueConstraint(columnNames = "symbol")})
 public class Price {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -18,7 +18,7 @@ private String exchange;
     @Column(nullable = false)
 private String symbol;
 
-    @Column(nullable = false, precision = 18, scale = 8)
+    @Column(nullable = false)
 private double price;
  @Column(nullable = false)
     private LocalDateTime timestamp;

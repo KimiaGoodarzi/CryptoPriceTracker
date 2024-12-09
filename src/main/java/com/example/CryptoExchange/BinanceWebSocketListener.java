@@ -2,11 +2,20 @@ package com.example.CryptoExchange;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Service;
 
 import java.net.http.WebSocket;
+import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
-public class BinanceWebSocketListener implements WebSocket.Listener{
+@Service
+public class BinanceWebSocketListener implements WebSocket.Listener {
+    private final PriceRepository priceRepository;
+
+    public BinanceWebSocketListener(PriceRepository priceRepository) {
+        this.priceRepository = priceRepository;
+    }
 
     @Override
     public void onOpen(WebSocket websocket) {
@@ -25,26 +34,48 @@ public class BinanceWebSocketListener implements WebSocket.Listener{
     }
 
     @Override
-    public CompletionStage<?> onText(WebSocket websocket, CharSequence data, boolean last) {
+    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
         try {
+            // Parse data
             ObjectMapper objectMapper = new ObjectMapper();
             JsonNode jsonNode = objectMapper.readTree(data.toString());
 
-            String symbol = jsonNode.get("s").asText(); // Symbol (e.g., BTCUSDT)
-            String price = jsonNode.get("c").asText(); // Current price
+            String symbol = jsonNode.get("s").asText();
+            Double price = jsonNode.get("c").asDouble();
 
-            System.out.printf("Symbol: %s, Price: %s%n", symbol, price);
+            // Check if the symbol already exists in the database
+            Optional<Price> existingPrice = priceRepository.findBySymbol(symbol);
+            if (existingPrice.isPresent()) {
+                Price priceRecord = existingPrice.get();
+                double previousPrice = priceRecord.getPrice();
+                double changePercentage = Math.abs((price - previousPrice) / previousPrice) * 100;
+
+                if (changePercentage > 0.1) { // Save only if the change is greater than 0.1%
+                    priceRecord.setPrice(price);
+                    priceRecord.setTimestamp(LocalDateTime.now());
+                    priceRepository.save(priceRecord);
+
+                    System.out.printf("Updated %s: $%.2f (%.2f%% change)%n", symbol, price, changePercentage);
+                }
+            } else {
+                // Insert a new record
+                Price newPriceRecord = new Price();
+                newPriceRecord.setExchange("Binance");
+                newPriceRecord.setSymbol(symbol);
+                newPriceRecord.setPrice(price);
+                newPriceRecord.setTimestamp(LocalDateTime.now());
+                priceRepository.save(newPriceRecord);
+
+                System.out.printf("Saved new %s: $%.2f%n", symbol, price);
+            }
+
+
         } catch (Exception e) {
-            System.err.println("Error processing message: " + e.getMessage());
+            System.err.println("Error processing WebSocket message: " + e.getMessage());
         }
-        return WebSocket.Listener.super.onText(websocket, data, last);
+        return WebSocket.Listener.super.onText(webSocket, data, last);
     }
 
-
-    public void onError(WebSocket webSocket, Throwable error){
-
-        System.out.println("WebSocket error: " + error.getMessage());
-    }
 
     @Override
     public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
@@ -52,4 +83,8 @@ public class BinanceWebSocketListener implements WebSocket.Listener{
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
     }
 
+    @Override
+    public void onError(WebSocket webSocket, Throwable error) {
+        System.err.println("WebSocket error: " + error.getMessage());
+    }
 }
